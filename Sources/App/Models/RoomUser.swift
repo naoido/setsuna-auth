@@ -16,16 +16,17 @@ final class RoomUser: Model, Content, @unchecked Sendable {
     @Field(key: "is_ready")
     var isReady: Bool
     
-    @Field(key: "result")
-    var result: Int?
+    @Field(key: "score")
+    var score: Int?
     
     init() { }
 
 
-    init(id: UUID? = nil, userID: UUID, roomID: UUID, isReady: Bool) {
+    init(id: UUID? = nil, userID: UUID, roomID: UUID, isReady: Bool, score: Int?) {
         self.id = id
         self.roomID = roomID
         self.userId = userID
         self.isReady = isReady
+        self.score = score
     }
 }

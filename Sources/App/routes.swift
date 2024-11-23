@@ -55,6 +55,10 @@ struct MatchStatus: Content {
     let room_id: String?
 }
 
+struct ResultMsg: Content {
+    let result: String?
+}
+
 var pool: [String:Bool] = [:]
 var ready: [String:Bool]? = nil
 var room_id: String? = nil
@@ -92,38 +96,43 @@ func routes(_ app: Application) throws {
         return UserID(user_id: payload.subject.value)
     }
     
-    app.get("result") { req async throws -> String in
-        let payload: TestPayload = try await req.jwt.verify(as: TestPayload.self)
-        let user_id: String = payload.subject.value
-        let result: ResultResponse = try req.content.decode(ResultResponse.self)
-        let room_id: String = result.room_id
-        
-        if (UUID(room_id) == nil) {
-            throw Abort(.badRequest, reason: "room_id is not UUID")
-        }
-        
-        let room = UUID(uuidString: room_id)!
-        let user = UUID(uuidString: user_id)!
-        
-        let room_user = RoomUser.query(on: req.db).filter(\.$roomID == room && \.$userID == user)
-        try await room_user.update(\.$result, to: result.score)
-        
-        let nil_result_user = RoomUser.query(on: req.db).filter(\.$roomID == room && \.$result == nil)
-        let results: RoomUser? = try await nil_result_user.first()
-        
-        // 全員の処理が完了していない場合
-        if (results != nil) {
-            return ""
-        }
-        
-        let win_user_query = RoomUser.query(on: req.db).filter(\.$roomID == room)
-        let win_user: RoomUser? = try await win_user_query.sort(\.$result, .descending).first()
-        
-        if (win_user.id == user) {
-            return "win"
-        } else {
-            return "lose"
-        }
+    app.post("result") { req async throws -> ResultMsg in
+            let payload = try await req.jwt.verify(as: TestPayload.self)
+            let user_id = payload.subject.value
+            let result = try req.content.decode(ResultResponse.self)
+            let room_id = result.room_id
+            
+            if (UUID(room_id) == nil) {
+                throw Abort(.badRequest, reason: "room_id is not UUID")
+            }
+            
+            let room = UUID(uuidString: room_id)!
+            let user = UUID(uuidString: user_id)!
+            
+            let old_user = try await RoomUser.query(on: req.db)
+                .filter(\.$roomID == room)
+                .filter(\.$userId == user).first()
+            
+            old_user?.score = result.score
+            try await old_user?.save(on: req.db)
+            
+            let nil_result_user = RoomUser.query(on: req.db).filter(\.$roomID == room).filter(\.$score == nil)
+            let results: RoomUser? = try await nil_result_user.first()
+            
+            // 全員の処理が完了していない場合
+            if (results != nil) {
+                return ResultMsg(result: "")
+            }
+           // Fetch all users in the room and sort by score descending
+           let all_users = try await RoomUser.query(on: req.db)
+               .filter(\.$roomID == room)
+               .sort(\.$score, .ascending)
+               .all()
+            if all_users.first!.score == result.score {
+               return ResultMsg(result: "win")
+           } else {
+               return ResultMsg(result: "lose")
+           }
     }
     
     app.post("matching") { req async throws -> MatchStatus in
@@ -153,7 +162,7 @@ func routes(_ app: Application) throws {
                 
                 // ルームユーザーを追加
                 for (key, value) in pool {
-                    let new_room_user = RoomUser.init(userID: UUID(user_id)!, roomID: new_room.id!, isReady: false)
+                    let new_room_user = RoomUser.init(userID: UUID(key)!, roomID: new_room.id!, isReady: false, score: nil)
                     try await new_room_user.create(on: req.db)
                 }
             }

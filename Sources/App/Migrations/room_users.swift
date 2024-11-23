@@ -8,7 +8,7 @@ struct CreateRoomUser: AsyncMigration {
             .field("room_id", .uuid, .references("rooms", "id"), .required)
             .field("user_id", .uuid, .references("users", "id"), .required)
             .field("is_ready", .bool, .sql(.default(0)), .required)
-            .field("result", .int)
+            .field("score", .int)
             .create()
     }
 
