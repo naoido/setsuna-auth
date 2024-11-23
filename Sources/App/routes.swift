@@ -7,12 +7,26 @@ struct Response: Content{
 }
 
 struct UserID: Content{
-    let userID: String
+    let user_id: String
+}
+
+struct Ready: Content{
+    let is_ready: Bool
+}
+
+struct RoomID: Content{
+    let room_id: String
 }
 
 struct MessageResponse: Content{
     let message: String
 }
+
+struct ReadyUser: Content{
+    let user_id: String!
+    let room_id: String!
+}
+    
 
 struct TestPayload: JWTPayload{
     enum CodingKeys: String, CodingKey {
@@ -41,10 +55,43 @@ func routes(_ app: Application) throws {
     }
     
     app.get("user") { req async throws -> UserID in
+        print(req)
         let payload = try await req.jwt.verify(as: TestPayload.self)
-        return UserID(userID: payload.subject.value)
+        return UserID(user_id: payload.subject.value)
     }
     
+    app.post("room") { req async throws ->  RoomID in
+        let room = Room(status: false)
+        try await room.save(on: req.db)
+        
+        print(room)
+        
+        return RoomID(room_id: room.id!.uuidString)
+    }
+    
+    
+    app.post("ready") { req async throws -> String in
+        let payload = try await req.jwt.verify(as: TestPayload.self)
+
+        let user_id = payload.subject.value
+        
+        guard let uuid = UUID(uuidString: user_id),
+        let user = try await RoomUser.query(on: req.db).filter(\.$id == uuid).first() else {
+            throw Abort(.unauthorized, reason: "")
+        }
+        print(user)
+        return "hello"
+    }
+    
+//    app.get("ready") { req async throws -> Ready in
+//        let request = try req.content.decode(ReadyUser.self)
+//        guard let is_ready = try await RoomUser.query(on: req.db).filter(\.$roomID.id = request.user_id).first() else {
+//            throw Abort(.notFound, reason: "ユーザーが見つかりません")
+//    
+//        }
+//        
+//        return Ready(is_ready: true)
+//    }
     
     app.post("login") { req async throws -> Response in
         let request = try req.content.decode(LoginUser.self)
