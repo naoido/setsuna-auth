@@ -14,19 +14,51 @@ struct Ready: Content{
     let is_ready: Bool
 }
 
-struct RoomID: Content{
+struct RoomsID: Content{
     let room_id: String
 }
 
+struct RID : Content{
+    let room_id: String
+}
+
+struct RoomID: Content{
+    let room_id: String
+}
+    
 struct MessageResponse: Content{
     let message: String
+}
+
+struct ResultResponse: Content{
+    let score: Int
+    let room_id: String
 }
 
 struct ReadyUser: Content{
     let user_id: String!
     let room_id: String!
 }
-    
+
+struct Power: Content{
+    let room_id: String
+    let power: Int
+}
+
+struct Matching: Content {
+    let is_leave: Bool
+}
+
+struct MatchStatus: Content {
+    let user_count: Int
+    let is_matched: Bool
+    let room_id: String?
+}
+
+var pool: [String:Bool] = [:]
+var ready: [String:Bool]? = nil
+var room_id: String? = nil
+
 
 struct TestPayload: JWTPayload{
     enum CodingKeys: String, CodingKey {
@@ -60,39 +92,112 @@ func routes(_ app: Application) throws {
         return UserID(user_id: payload.subject.value)
     }
     
-    app.post("room") { req async throws ->  RoomID in
-        let room = Room(status: false)
-        try await room.save(on: req.db)
+    app.get("result") { req async throws -> String in
+        let payload: TestPayload = try await req.jwt.verify(as: TestPayload.self)
+        let user_id: String = payload.subject.value
+        let result: ResultResponse = try req.content.decode(ResultResponse.self)
+        let room_id: String = result.room_id
         
-        print(room)
+        if (UUID(room_id) == nil) {
+            throw Abort(.badRequest, reason: "room_id is not UUID")
+        }
         
-        return RoomID(room_id: room.id!.uuidString)
+        let room = UUID(uuidString: room_id)!
+        let user = UUID(uuidString: user_id)!
+        
+        let room_user = RoomUser.query(on: req.db).filter(\.$roomID == room && \.$userID == user)
+        try await room_user.update(\.$result, to: result.score)
+        
+        let nil_result_user = RoomUser.query(on: req.db).filter(\.$roomID == room && \.$result == nil)
+        let results: RoomUser? = try await nil_result_user.first()
+        
+        // 全員の処理が完了していない場合
+        if (results != nil) {
+            return ""
+        }
+        
+        let win_user_query = RoomUser.query(on: req.db).filter(\.$roomID == room)
+        let win_user: RoomUser? = try await win_user_query.sort(\.$result, .descending).first()
+        
+        if (win_user.id == user) {
+            return "win"
+        } else {
+            return "lose"
+        }
     }
     
-    app.
+    app.post("matching") { req async throws -> MatchStatus in
+        let payload = try await req.jwt.verify(as: TestPayload.self)
+        let user_id: String = payload.subject.value
+        
+        if (UUID(user_id) == nil) {
+            throw Abort(.badRequest, reason: "user_is is not UUID")
+        }
+        
+        if (try req.content.decode(Matching.self).is_leave) {
+            pool.removeValue(forKey: user_id)
+            return MatchStatus.init(user_count: pool.count, is_matched: false, room_id: nil)
+        }
+        
+        // マッチングプールにユーザーを追加
+        if (pool[user_id] == nil) {
+            pool.updateValue(false, forKey: user_id)
+        }
+        
+        if (1 < pool.count) {
+            if (room_id == nil) {
+                let new_room = Room(status: true)
+                try await new_room.save(on: req.db)
+                
+                room_id = new_room.id?.uuidString
+                
+                // ルームユーザーを追加
+                for (key, value) in pool {
+                    let new_room_user = RoomUser.init(userID: UUID(user_id)!, roomID: new_room.id!, isReady: false)
+                    try await new_room_user.create(on: req.db)
+                }
+            }
+            
+            pool.updateValue(true, forKey: user_id)
+        }
+        
+        let is_matched = pool.values.allSatisfy { $0 }
+        let match_status = MatchStatus.init(user_count: pool.count, is_matched: is_matched, room_id: room_id)
+        
+        // マッチングプールを初期化
+        if (is_matched && ready == nil) {
+            ready = [:]
+            for (key, _) in pool {
+                ready!.updateValue(false, forKey: key)
+            }
+            
+            ready!.updateValue(true, forKey: user_id)
+        } else if (ready != nil) {
+            ready!.updateValue(true, forKey: user_id)
+            let is_all_user_ready = ready!.values.allSatisfy { $0 }
+            // 全員マッチ完了を取得したら初期化
+            if (is_all_user_ready) {
+                pool.removeAll()
+                ready = nil
+                room_id = nil
+            }
+        }
+        
+        return match_status
+    }
     
     app.post("ready") { req async throws -> String in
         let payload = try await req.jwt.verify(as: TestPayload.self)
-
+        
         let user_id = payload.subject.value
         
         guard let uuid = UUID(uuidString: user_id),
-        let user = try await RoomUser.query(on: req.db).filter(\.$id == uuid).first() else {
+              let user = try await RoomUser.query(on: req.db).filter(\.$id == uuid).first() else {
             throw Abort(.unauthorized, reason: "")
         }
         print(user)
         return "hello"
     }
-    
-//    app.get("ready") { req async throws -> Ready in
-//        let request = try req.content.decode(ReadyUser.self)
-//        guard let is_ready = try await RoomUser.query(on: req.db).filter(\.$roomID.id = request.user_id).first() else {
-//            throw Abort(.notFound, reason: "ユーザーが見つかりません")
-//    
-//        }
-//        
-//        return Ready(is_ready: true)
-//    }
     
     app.post("login") { req async throws -> Response in
         let request = try req.content.decode(LoginUser.self)
@@ -111,7 +216,6 @@ func routes(_ app: Application) throws {
         
         return try await Response(token: req.jwt.sign(payload))
     }
-    
     
     app.post("register") { req async throws -> Response in
         let request = try req.content.decode(User.self)
@@ -139,10 +243,4 @@ func routes(_ app: Application) throws {
         )
         return try await Response(token: req.jwt.sign(payload))
     }
-        
-        
 }
-
-
-
-

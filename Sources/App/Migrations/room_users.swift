@@ -5,9 +5,10 @@ struct CreateRoomUser: AsyncMigration {
     func prepare(on database: Database) async throws {
         try await database.schema("room_users")
             .id()
-            .field("room_id", .uuid, .references("rooms", "id"))
-            .field("user_id", .uuid, .references("users", "id"))
-            .field("is_ready", .bool, .sql(.default(0)))
+            .field("room_id", .uuid, .references("rooms", "id"), .required)
+            .field("user_id", .uuid, .references("users", "id"), .required)
+            .field("is_ready", .bool, .sql(.default(0)), .required)
+            .field("result", .int)
             .create()
     }
 

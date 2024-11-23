@@ -7,23 +7,25 @@ final class RoomUser: Model, Content, @unchecked Sendable {
     @ID(key: .id)
     var id: UUID?
     
-    @Parent(key: "room_id")
-    var roomID: Room
+    @Field(key: "room_id")
+    var roomID: Room.IDValue
     
-    @Parent(key: "user_id")
-    var user: User
+    @Field(key: "user_id")
+    var userId: User.IDValue
     
     @Field(key: "is_ready")
     var isReady: Bool
     
+    @Field(key: "result")
+    var result: Int?
     
     init() { }
 
 
     init(id: UUID? = nil, userID: UUID, roomID: UUID, isReady: Bool) {
         self.id = id
-        self.$roomID.id = roomID
-        self.$user.id = userID
+        self.roomID = roomID
+        self.userId = userID
         self.isReady = isReady
     }
 }
