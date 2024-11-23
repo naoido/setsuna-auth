@@ -69,6 +69,7 @@ func routes(_ app: Application) throws {
         return RoomID(room_id: room.id!.uuidString)
     }
     
+    app.
     
     app.post("ready") { req async throws -> String in
         let payload = try await req.jwt.verify(as: TestPayload.self)
